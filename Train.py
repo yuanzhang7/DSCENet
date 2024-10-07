@@ -11,7 +11,6 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from Test_data.Model.Network import DSCNet_pro
 from Loss import cross_loss
 from MyDataloader import Dataloader, Dataloader_test
 
