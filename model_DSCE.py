@@ -57,7 +57,7 @@ class FusedAttention(nn.Module):
         # w = int(n ** 0.5)
         h = math.floor(n ** 0.5)
         w = math.floor(n ** 0.5)
-        #直接去掉不等于行和列乘积的多余的特征
+     
         if h*w != n:
             print("h*w",h*w,"n",n)
             indices = torch.randint(0, n, (h*w,))  # 在 [0, n) 范围内生成 h*w 个随机整数作为索引
