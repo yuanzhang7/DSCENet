@@ -8,7 +8,7 @@ import warnings
 from timm.models.layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_
 
 
-class AgentAttention(nn.Module):
+class FusedAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.,
                  agent_num=49, window=14, **kwargs):
         super().__init__()
@@ -131,7 +131,7 @@ class AgentBlock(nn.Module):
                  agent_num=49, window=14):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = AgentAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
+        self.attn = FusedAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
                                    agent_num=agent_num, window=window)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
