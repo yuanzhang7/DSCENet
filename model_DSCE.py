@@ -10,7 +10,7 @@ from timm.models.layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_n
 
 class FusedAttention(nn.Module):
     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.,
-                 agent_num=49, window=14, **kwargs):
+                 fused_num=49, window=14, **kwargs):
         super().__init__()
         self.dim = dim
         self.num_heads = num_heads
@@ -22,19 +22,19 @@ class FusedAttention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
         self.softmax = nn.Softmax(dim=-1)
 
-        self.agent_num = agent_num
+        self.fused_num = fused_num
         self.window = window
 
         self.dwc = nn.Conv2d(in_channels=dim, out_channels=dim, kernel_size=(3, 3),
                              padding=1, groups=dim)
-        self.an_bias = nn.Parameter(torch.zeros(num_heads, agent_num, 7, 7))
-        self.na_bias = nn.Parameter(torch.zeros(num_heads, agent_num, 7, 7))
-        self.ah_bias = nn.Parameter(torch.zeros(1, num_heads, agent_num, window, 1))
-        self.aw_bias = nn.Parameter(torch.zeros(1, num_heads, agent_num, 1, window))
-        self.ha_bias = nn.Parameter(torch.zeros(1, num_heads, window, 1, agent_num))
-        self.wa_bias = nn.Parameter(torch.zeros(1, num_heads, 1, window, agent_num))
-        self.ac_bias = nn.Parameter(torch.zeros(1, num_heads, agent_num, 1))
-        self.ca_bias = nn.Parameter(torch.zeros(1, num_heads, 1, agent_num))
+        self.an_bias = nn.Parameter(torch.zeros(num_heads, fused_num, 7, 7))
+        self.na_bias = nn.Parameter(torch.zeros(num_heads, fused_num, 7, 7))
+        self.ah_bias = nn.Parameter(torch.zeros(1, num_heads, fused_num, window, 1))
+        self.aw_bias = nn.Parameter(torch.zeros(1, num_heads, fused_num, 1, window))
+        self.ha_bias = nn.Parameter(torch.zeros(1, num_heads, window, 1, fused_num))
+        self.wa_bias = nn.Parameter(torch.zeros(1, num_heads, 1, window, fused_num))
+        self.ac_bias = nn.Parameter(torch.zeros(1, num_heads, fused_num, 1))
+        self.ca_bias = nn.Parameter(torch.zeros(1, num_heads, 1, fused_num))
         trunc_normal_(self.an_bias, std=.02)
         trunc_normal_(self.na_bias, std=.02)
         trunc_normal_(self.ah_bias, std=.02)
@@ -43,7 +43,7 @@ class FusedAttention(nn.Module):
         trunc_normal_(self.wa_bias, std=.02)
         trunc_normal_(self.ac_bias, std=.02)
         trunc_normal_(self.ca_bias, std=.02)
-        pool_size = int(agent_num ** 0.5)
+        pool_size = int(fused_num ** 0.5)
         self.pool = nn.AdaptiveAvgPool2d(output_size=(pool_size, pool_size))
 
     def forward(self, x):
@@ -74,46 +74,46 @@ class FusedAttention(nn.Module):
         sliced_q = q[:, :, :].reshape(b, h, w, c).permute(0, 3, 1, 2)
         pooled_q = self.pool(sliced_q)
         reshaped_pooled_q = pooled_q.reshape(b, c, -1)
-        agent_tokens = reshaped_pooled_q.permute(0, 2, 1)#[1,49,1024]
+        fused_tokens = reshaped_pooled_q.permute(0, 2, 1)#[1,49,1024]
 
         q = q.reshape(b, n, num_heads, head_dim).permute(0, 2, 1, 3)#[1,8,1764,128]
         k = k.reshape(b, n, num_heads, head_dim).permute(0, 2, 1, 3)
         v = v.reshape(b, n, num_heads, head_dim).permute(0, 2, 1, 3)
-        agent_tokens = agent_tokens.reshape(b, self.agent_num, num_heads, head_dim).permute(0, 2, 1, 3)#[1,8,49,128]
+        fused_tokens = fused_tokens.reshape(b, self.fused_num, num_heads, head_dim).permute(0, 2, 1, 3)#[1,8,49,128]
 
         position_bias1 = nn.functional.interpolate(self.an_bias, size=(self.window, self.window), mode='bilinear')#[8,49,14,14]
 
-        position_bias1 = position_bias1.reshape(1, num_heads, self.agent_num, -1).repeat(b, 1, 1, 1)#[1,8,49,196]
-        position_bias2 = (self.ah_bias + self.aw_bias).reshape(1, num_heads, self.agent_num, -1).repeat(b, 1, 1, 1)##[1,8,49,196]
+        position_bias1 = position_bias1.reshape(1, num_heads, self.fused_num, -1).repeat(b, 1, 1, 1)#[1,8,49,196]
+        position_bias2 = (self.ah_bias + self.aw_bias).reshape(1, num_heads, self.fused_num, -1).repeat(b, 1, 1, 1)##[1,8,49,196]
 
         position_bias = position_bias1 + position_bias2#[1,8,49,196]
 
         k_t= k.transpose(-2, -1)
-        weighted_scores = (agent_tokens * self.scale) @ k_t
+        weighted_scores = (fused_tokens * self.scale) @ k_t
         position_bias_shape = weighted_scores.shape
         position_bias_new = nn.functional.interpolate(position_bias,size=position_bias_shape[2:],
                                            mode='bilinear', align_corners=False)
         weighted_scores_with_bias = weighted_scores + position_bias_new
 
-        agent_attn = self.softmax(weighted_scores_with_bias)
+        fused_attn = self.softmax(weighted_scores_with_bias)
 
-        agent_attn = self.attn_drop(agent_attn)
-        agent_v = agent_attn @ v
+        fused_attn = self.attn_drop(fused_attn)
+        fused_v = fused_attn @ v
 
-        agent_bias1 = nn.functional.interpolate(self.na_bias, size=(self.window, self.window), mode='bilinear')
-        agent_bias1 = agent_bias1.reshape(1, num_heads, self.agent_num, -1).permute(0, 1, 3, 2).repeat(b, 1, 1, 1)
-        agent_bias2 = (self.ha_bias + self.wa_bias).reshape(1, num_heads, -1, self.agent_num).repeat(b, 1, 1, 1)
-        agent_bias = agent_bias1 + agent_bias2
-        agent_bias = torch.cat([self.ca_bias.repeat(b, 1, 1, 1), agent_bias], dim=-2)
+        fused_bias1 = nn.functional.interpolate(self.na_bias, size=(self.window, self.window), mode='bilinear')
+        fused_bias1 = fused_bias1.reshape(1, num_heads, self.fused_num, -1).permute(0, 1, 3, 2).repeat(b, 1, 1, 1)
+        fused_bias2 = (self.ha_bias + self.wa_bias).reshape(1, num_heads, -1, self.fused_num).repeat(b, 1, 1, 1)
+        fused_bias = fused_bias1 + fused_bias2
+        fused_bias = torch.cat([self.ca_bias.repeat(b, 1, 1, 1), fused_bias], dim=-2)
 
-        q_attn_1 = (q * self.scale) @ agent_tokens.transpose(-2, -1)
+        q_attn_1 = (q * self.scale) @ fused_tokens.transpose(-2, -1)
         q_attn_shape=q_attn_1.shape
-        agent_bias_new = nn.functional.interpolate(agent_bias,size=q_attn_shape[2:],
+        fused_bias_new = nn.functional.interpolate(fused_bias,size=q_attn_shape[2:],
                                            mode='bilinear', align_corners=False)
-        q_attn = self.softmax(q_attn_1 + agent_bias_new)
+        q_attn = self.softmax(q_attn_1 + fused_bias_new)
 
         q_attn = self.attn_drop(q_attn)
-        x = q_attn @ agent_v
+        x = q_attn @ fused_v
 
         x = x.transpose(1, 2).reshape(b, n, c)
         v_ = v[:, :, :, :].transpose(1, 2).reshape(b, h, w, c).permute(0, 3, 1, 2)
@@ -124,15 +124,15 @@ class FusedAttention(nn.Module):
         return x
 
 
-class AgentBlock(nn.Module):
+class FusedBlock(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm,
-                 agent_num=49, window=14):
+                 fused_num=49, window=14):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = FusedAttention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
-                                   agent_num=agent_num, window=window)
+                                   fused_num=fused_num, window=window)
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
@@ -167,12 +167,12 @@ class DSCE(nn.Module):
         
         assert self.top_k == 1
 
-        self.agent = nn.Sequential(
+        self.fused = nn.Sequential(
             *[
-                AgentBlock(
+                FusedBlock(
                     dim=1024, num_heads=8, mlp_ratio=4., qkv_bias=False, drop=0.,
                     attn_drop=0., drop_path=0., norm_layer=nn.LayerNorm, act_layer=nn.GELU,
-                    agent_num=49)
+                    fused_num=49)
             ]
         )
         self.fc_concact = nn.Sequential(
@@ -200,8 +200,8 @@ class DSCE(nn.Module):
             h_square = h[:, indices, :]
             h=h_square
 
-        h_agent=self.agent(h)
-        h = self.fc(h_agent)
+        h_fused=self.fused(h)
+        h = self.fc(h_fused)
         h = h.squeeze(0)
         logits = torch.empty(h.size(0), self.n_classes).float().to(device)
 
