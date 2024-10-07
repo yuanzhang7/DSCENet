@@ -1,9 +1,12 @@
-# DSCENet
+# Introduction
 
 DSCENet: Dynamic Screening and Clinical-Enhanced Multimodal Fusion for MPNs Subtype Classification is accepted by MICCAI 2024, oral.
 You can access the full article [here](https://arxiv.org/abs/2407.08167).
 
 We propose a Dynamic Screening and Clinical-Enhanced Network (DSCENet) for the subtype classification of MPNs on the multimodal fusion of whole slide images (WSIs) and clinical information. 
+
+
+# usage
 We have uploaded part of the code, in which the core model is located in Model.DSCE
 ```
         from Models.model_DSCE import DSCE
@@ -16,7 +19,9 @@ We have uploaded part of the code, in which the core model is located in Model.D
 ```
 Our code is currently undergoing generalizability testing. Stay tuned.
 
+## Citation
 
+```
 @InProceedings{Zha_DSCENet_MICCAI2024,
         author = { Zhang, Yuan and Qi, Yaolei and Qi, Xiaoming and Wei, Yongyue and Yang, Guanyu},
         title = { { DSCENet: Dynamic Screening and Clinical-Enhanced Multimodal Fusion for MPNs Subtype Classification } },
@@ -27,3 +32,9 @@ Our code is currently undergoing generalizability testing. Stay tuned.
         month = {October},
         page = {pending}
 }
+```
+
+
+
+
+
