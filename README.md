@@ -21,7 +21,7 @@ Our code is currently undergoing generalizability testing. Stay tuned.
 
 
 ## Availability of dataset
-We are trying to communicate and make the feature of the data open source...
+We are trying to communicate and make the feature of the data open source. For data usage and potential collaboration inquiries, please contact the author via email.
 
 
 ## Citation
